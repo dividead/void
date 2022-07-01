@@ -23,4 +23,12 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run build
-      - run: npm run zip
+      - run: cp ./build/index.js .
+      - run: tar -czf release.zip index.js package.json
+      - run: mkdir downloads
+      - run: mv release.zip ./downloads
+      - name: upload
+        uses: actions/upload-artifact@v2
+        with:
+          name: assets-for-download
+          path: downloads

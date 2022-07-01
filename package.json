@@ -4,8 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "npx tsc",
-    "zip": "tar -czf release.zip index.js package.json"
+    "build": "npx tsc"
   },
   "author": "",
   "license": "MIT",
