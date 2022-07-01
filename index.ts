@@ -85,8 +85,7 @@ const findKey = (ctx: Context) => {
   const tag = findTag(ctx);
   if (!tag) return;
   const { text, caption } = ctx.message;
-  if (!caption) return;
-  return getKey(text || caption, tag);
+  return getKey(text || (caption as string), tag);
 };
 
 const replyTo = (ctx: Context) => {
