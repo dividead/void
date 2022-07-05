@@ -27,8 +27,8 @@ jobs:
       - run: tar -czf release.zip index.js package.json
       - run: mkdir downloads
       - run: mv release.zip ./downloads
-      - name: upload
+      - name: artifact
         uses: actions/upload-artifact@v2
         with:
-          name: assets-for-download
+          name: release
           path: downloads
