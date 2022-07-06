@@ -1,8 +1,24 @@
 import { Context, Telegraf } from "telegraf";
 import { MessageEntity } from "telegraf/typings/telegram-types";
 import { Driver, MetadataAuthService, TypedData, Ydb } from "ydb-sdk";
+import { v4 } from "uuid";
 
 type ResultSet = Ydb.IResultSet[];
+
+// type Extra = {
+//   id: string;
+//   type: string;
+//   file_id?: string;
+//   text?: string;
+// };
+
+// type LogEntry = {
+//   id: string; // uuid v4
+//   chat_id: number;
+//   user_id: number;
+//   extra: string;
+//   ts: number; // unix
+// };
 
 let db: Driver;
 
@@ -18,6 +34,30 @@ const init_db = async () => {
     // process.exit(1);
   }
   // console.log('Driver ready');
+};
+
+const sendStats = async (chat_id: number, user_id: number, key: string) => {
+  const query = `insert into extras_logs (id, chat_id, user_id, extra, ts) 
+  values ('${v4()}', '${chat_id}', '${user_id}', '${key}', '${Date.now()}');`;
+  await db?.tableClient.withSession(async (session) => {
+    await session.executeQuery(query);
+  });
+};
+
+const getStats = async (
+  cb: (rs: ResultSet) => void,
+  chat_id: number,
+  key: string
+) => {
+  const query = `select user_id, count(user_id) from extras_logs 
+  where chat_id='${chat_id}' and extra='${key}'
+  group by user_id;`;
+
+  await db?.tableClient.withSession(async (session) => {
+    const { resultSets } = await session.executeQuery(query);
+
+    cb(resultSets);
+  });
 };
 
 const insert = async (
@@ -46,6 +86,7 @@ const insert = async (
 const fetch = async (
   cb: (rs: ResultSet) => void,
   chat_id: number,
+  user_id: number,
   key: string
 ) => {
   const query = `
@@ -58,6 +99,8 @@ const fetch = async (
     const { resultSets } = await session.executeQuery(query);
 
     cb(resultSets);
+
+    sendStats(chat_id, user_id, key).catch(console.error);
   });
 };
 
@@ -162,10 +205,30 @@ bot.command("extradel", async (ctx) => {
   }
 });
 
+bot.command("extrastat", async (ctx) => {
+  if (!ctx.message) return;
+  const { chat } = ctx.message;
+  try {
+    const key = findKey(ctx);
+    if (!key) return;
+    const cb = (rs: ResultSet) => {
+      if (!rs) return;
+      const rows = TypedData.createNativeObjects(rs[0]);
+      if (!rows.length) return ctx.reply("🤔", replyTo(ctx));
+      const data = rows;
+      return ctx.reply(JSON.stringify(data), replyTo(ctx));
+    };
+    getStats(cb, chat.id, key);
+  } catch (e) {
+    console.error(e);
+    sendSticker(ctx, "nope");
+  }
+});
+
 bot.on("message", async (ctx) => {
   if (!ctx.message) return;
   // console.log("message", JSON.stringify(ctx.message));
-  const { chat } = ctx.message;
+  const { chat, from } = ctx.message;
   const key = findKey(ctx);
   if (!key) return;
   const cb = (rs: ResultSet) => {
@@ -193,7 +256,7 @@ bot.on("message", async (ctx) => {
         break;
     }
   };
-  fetch(cb, chat.id, key);
+  fetch(cb, chat.id, from?.id as number, key);
 });
 
 export const handler = async (event: { body: string }, _: Context) => {
