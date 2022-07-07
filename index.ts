@@ -36,9 +36,15 @@ const init_db = async () => {
   // console.log('Driver ready');
 };
 
-const sendStats = async (chat_id: number, user_id: number, key: string) => {
-  const query = `insert into extras_logs (id, chat_id, user_id, extra, ts) 
-  values ('${v4()}', ${chat_id}, ${user_id}, '${key}', ${Date.now()});`;
+const sendStats = async (
+  chat_id: number,
+  user_id: number,
+  key: string,
+  username?: string
+) => {
+  if (!username) return;
+  const query = `insert into extras_logs (id, chat_id, user_id, username, extra, ts) 
+  values ('${v4()}', ${chat_id}, ${user_id}, '${username}', '${key}', ${Date.now()});`;
   await db?.tableClient.withSession(async (session) => {
     await session.executeQuery(query);
   });
@@ -49,9 +55,10 @@ const getStats = async (
   chat_id: number,
   key: string
 ) => {
-  const query = `select user_id, count(user_id) from extras_logs 
+  const query = `select username, count(username) as count from extras_logs 
   where chat_id=${chat_id} and extra='${key}'
-  group by user_id;`;
+  group by username
+  order by count desc;`;
 
   await db?.tableClient.withSession(async (session) => {
     const { resultSets } = await session.executeQuery(query);
@@ -87,7 +94,8 @@ const fetch = async (
   cb: (rs: ResultSet) => void,
   chat_id: number,
   user_id: number,
-  key: string
+  key: string,
+  username?: string
 ) => {
   const query = `
     select (type, file_id, text)
@@ -100,7 +108,7 @@ const fetch = async (
 
     cb(resultSets);
 
-    sendStats(chat_id, user_id, key).catch(console.error);
+    sendStats(chat_id, user_id, key, username).catch(console.error);
   });
 };
 
@@ -215,8 +223,10 @@ bot.command("extrastat", async (ctx) => {
       if (!rs) return;
       const rows = TypedData.createNativeObjects(rs[0]);
       if (!rows.length) return ctx.reply("🤔", replyTo(ctx));
-      const data = rows;
-      return ctx.reply(JSON.stringify(data), replyTo(ctx));
+      const data = rows
+        .map(({ username, count }) => [username, count].join(": "))
+        .join("\n");
+      return ctx.reply(data, replyTo(ctx));
     };
     getStats(cb, chat.id, key);
   } catch (e) {
@@ -256,7 +266,7 @@ bot.on("message", async (ctx) => {
         break;
     }
   };
-  fetch(cb, chat.id, from?.id as number, key);
+  fetch(cb, chat.id, from?.id as number, key, from?.username);
 });
 
 export const handler = async (event: { body: string }, _: Context) => {
