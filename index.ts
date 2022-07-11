@@ -43,8 +43,11 @@ const sendStats = async (
   username?: string
 ) => {
   if (!username) return;
+  // TODO: fix db schema, chat_id should be signed
   const query = `insert into extras_logs (id, chat_id, user_id, username, extra, ts) 
-  values ('${v4()}', ${chat_id}, ${user_id}, '${username}', '${key}', ${Date.now()});`;
+  values ('${v4()}', ${Math.abs(
+    chat_id
+  )}, ${user_id}, '${username}', '${key}', ${Date.now()});`;
   await db?.tableClient.withSession(async (session) => {
     await session.executeQuery(query);
   });
@@ -55,8 +58,9 @@ const getStats = async (
   chat_id: number,
   key: string
 ) => {
+  // TODO: fix db schema, chat_id should be signed
   const query = `select username, count(username) as count from extras_logs 
-  where chat_id=${chat_id} and extra='${key}'
+  where chat_id=${Math.abs(chat_id)} and extra='${key}'
   group by username
   order by count desc;`;
 
@@ -117,6 +121,17 @@ const remove = async (chat_id: number, key: string) => {
 
   await db?.tableClient.withSession(async (session) => {
     await session.executeQuery(query);
+  });
+};
+
+const listExtras = async (cb: (rs: ResultSet) => void, chat_id: number) => {
+  // TODO: fix schema
+  const query = `select id from extras where id like '${chat_id}%';`;
+
+  await db?.tableClient.withSession(async (session) => {
+    const { resultSets } = await session.executeQuery(query);
+
+    cb(resultSets);
   });
 };
 
@@ -229,6 +244,28 @@ bot.command("extrastat", async (ctx) => {
       return ctx.reply(data, replyTo(ctx));
     };
     getStats(cb, chat.id, key);
+  } catch (e) {
+    console.error(e);
+    sendSticker(ctx, "nope");
+  }
+});
+
+bot.command("extralist", async (ctx) => {
+  if (!ctx.message) return;
+  const { chat } = ctx.message;
+  try {
+    const cb = (rs: ResultSet) => {
+      if (!rs) return;
+      const rows = TypedData.createNativeObjects(rs[0]);
+      if (!rows.length) return ctx.reply("🤔", replyTo(ctx));
+      const data = rows
+        .map(({ id }) => id.split(":"))
+        .map((i) => `#${i[1]}`)
+        .sort()
+        .join("\n");
+      return ctx.reply(data, replyTo(ctx));
+    };
+    listExtras(cb, chat.id);
   } catch (e) {
     console.error(e);
     sendSticker(ctx, "nope");
