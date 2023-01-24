@@ -36,41 +36,6 @@ const init_db = async () => {
   // console.log('Driver ready');
 };
 
-const sendStats = async (
-  chat_id: number,
-  user_id: number,
-  key: string,
-  username?: string
-) => {
-  if (!username) return;
-  // TODO: fix db schema, chat_id should be signed
-  const query = `insert into extras_logs (id, chat_id, user_id, username, extra, ts) 
-  values ('${v4()}', ${Math.abs(
-    chat_id
-  )}, ${user_id}, '${username}', '${key}', ${Date.now()});`;
-  await db?.tableClient.withSession(async (session) => {
-    await session.executeQuery(query);
-  });
-};
-
-const getStats = async (
-  cb: (rs: ResultSet) => void,
-  chat_id: number,
-  key: string
-) => {
-  // TODO: fix db schema, chat_id should be signed
-  const query = `select username, count(username) as count from extras_logs 
-  where chat_id=${Math.abs(chat_id)} and extra='${key}'
-  group by username
-  order by count desc;`;
-
-  await db?.tableClient.withSession(async (session) => {
-    const { resultSets } = await session.executeQuery(query);
-
-    cb(resultSets);
-  });
-};
-
 const insert = async (
   chat_id: number,
   type: string,
@@ -79,14 +44,14 @@ const insert = async (
   text?: string
 ) => {
   let query = "";
-  let id = `${chat_id}:${key}`;
+  let id = v4();
 
   if (type === "text") {
-    query = `insert into extras (id, type, text)
-          values ('${id}', 'text', '${text}');`;
+    query = `insert into extras (id, chat_id, key, type, text)
+          values ('${id}', ${chat_id}, '${key}', 'text', '${text}');`;
   } else {
-    query = `insert into extras (id, type, file_id)
-          values ('${id}', '${type}', '${file_id}');`;
+    query = `insert into extras (id, chat_id, key, type, file_id)
+          values ('${id}', ${chat_id}, '${key}', '${type}', '${file_id}');`;
   }
 
   await db?.tableClient.withSession(async (session) => {
@@ -104,20 +69,18 @@ const fetch = async (
   const query = `
     select (type, file_id, text)
     from extras 
-    where id='${chat_id}:${key}'
+    where chat_id=${chat_id} and key='${key}'
     limit 1;`;
 
   await db?.tableClient.withSession(async (session) => {
     const { resultSets } = await session.executeQuery(query);
 
     cb(resultSets);
-
-    sendStats(chat_id, user_id, key, username).catch(console.error);
   });
 };
 
 const remove = async (chat_id: number, key: string) => {
-  const query = `delete from extras where id='${chat_id}:${key}';`;
+  const query = `delete from extras where chat_id=${chat_id} and key='${key}';`;
 
   await db?.tableClient.withSession(async (session) => {
     await session.executeQuery(query);
@@ -125,8 +88,7 @@ const remove = async (chat_id: number, key: string) => {
 };
 
 const listExtras = async (cb: (rs: ResultSet) => void, chat_id: number) => {
-  // TODO: fix schema
-  const query = `select id from extras where id like '${chat_id}%';`;
+  const query = `select key from extras where chat_id=${chat_id};`;
 
   await db?.tableClient.withSession(async (session) => {
     const { resultSets } = await session.executeQuery(query);
@@ -228,28 +190,6 @@ bot.command("extradel", async (ctx) => {
   }
 });
 
-bot.command("extrastat", async (ctx) => {
-  if (!ctx.message) return;
-  const { chat } = ctx.message;
-  try {
-    const key = findKey(ctx);
-    if (!key) return;
-    const cb = (rs: ResultSet) => {
-      if (!rs) return;
-      const rows = TypedData.createNativeObjects(rs[0]);
-      if (!rows.length) return ctx.reply("🤔", replyTo(ctx));
-      const data = rows
-        .map(({ username, count }) => [username, count].join(": "))
-        .join("\n");
-      return ctx.reply(data, replyTo(ctx));
-    };
-    getStats(cb, chat.id, key);
-  } catch (e) {
-    console.error(e);
-    sendSticker(ctx, "nope");
-  }
-});
-
 bot.command("extralist", async (ctx) => {
   if (!ctx.message) return;
   const { chat } = ctx.message;
@@ -259,8 +199,7 @@ bot.command("extralist", async (ctx) => {
       const rows = TypedData.createNativeObjects(rs[0]);
       if (!rows.length) return ctx.reply("🤔", replyTo(ctx));
       const data = rows
-        .map(({ id }) => id.split(":"))
-        .map((i) => `#${i[1]}`)
+        .map(({ key }) => key)
         .sort()
         .join("\n");
       return ctx.reply(data, replyTo(ctx));
